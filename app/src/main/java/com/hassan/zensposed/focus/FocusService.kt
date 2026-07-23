@@ -228,6 +228,7 @@ class FocusService : LifecycleService() {
         if (top == Constants.PACKAGE_NAME) return
         if (top == "com.android.systemui") return
         if (AppResolver.isTransientSystemUi(top)) return
+        if (AppResolver.isInputMethod(top, this)) return
         if (top in session.whitelist) return
         if (top in AppResolver.alwaysAllowedPackages(this)) return
         // Launcher or any other non-allowed package → bring focus back.

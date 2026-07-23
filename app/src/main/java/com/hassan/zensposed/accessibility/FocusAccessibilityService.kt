@@ -27,6 +27,9 @@ class FocusAccessibilityService : AccessibilityService() {
         if (pkg == "com.android.systemui") return
         if (pkg.contains("keyguard", ignoreCase = true)) return
         if (AppResolver.isTransientSystemUi(pkg)) return
+        // Soft keyboards (Gboard, etc.) own WINDOW_STATE_CHANGED while typing in a
+        // whitelisted app — never bounce Focus for IMEs.
+        if (AppResolver.isInputMethod(pkg, this)) return
 
         val allowed = session.whitelist + AppResolver.alwaysAllowedPackages(this)
 

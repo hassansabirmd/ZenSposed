@@ -365,6 +365,8 @@ class FocusXposedEntry : IXposedHookLoadPackage {
         // Share sheet / docs / installer mid-flows used by whitelisted apps.
         if (pkg in Constants.SESSION_SYSTEM_UI) return
         if (isTransientSystemUiPkg(pkg)) return
+        // Soft keyboards (Gboard etc.) must not be blocked while typing.
+        if (pkg in Constants.SESSION_IME || isInputMethodPkg(pkg)) return
         // System Wi‑Fi / connectivity panels opened from the focus screen.
         if (action.startsWith("android.settings.panel.") ||
             action == "android.settings.WIFI_SETTINGS" ||
@@ -399,5 +401,13 @@ class FocusXposedEntry : IXposedHookLoadPackage {
             lower.contains("documentsui") ||
             lower.contains("permissioncontroller") ||
             lower.endsWith(".packageinstaller")
+    }
+
+    private fun isInputMethodPkg(pkg: String): Boolean {
+        val lower = pkg.lowercase()
+        return lower.contains("inputmethod") ||
+            lower.contains("honeyboard") ||
+            lower.contains("swiftkey") ||
+            (lower.contains("keyboard") && !lower.contains("settings"))
     }
 }

@@ -119,18 +119,28 @@ object RootManager {
             "cmd appops set $pkg RUN_IN_BACKGROUND allow",
             "cmd appops set $pkg RUN_ANY_IN_BACKGROUND allow",
             "cmd appops set $pkg SYSTEM_ALERT_WINDOW allow",
-            "settings put global app_standby_enabled 0",
             "cmd deviceidle disable"
         )
         // OEM-specific protected-app / auto-start (best effort, ignored where absent).
         run("dumpsys deviceidle whitelist +$pkg")
     }
 
+    /**
+     * Undo session-only keep-alive (re-enable Doze globally).
+     *
+     * Important: do **not** run `dumpsys deviceidle whitelist -$pkg`. That removes the
+     * same allowlist entry that [PowerManager.isIgnoringBatteryOptimizations] reflects,
+     * so ending a session would bounce the user back to onboarding with battery
+     * optimization shown as unchecked.
+     */
     fun releaseKeepAlive() {
         val pkg = Constants.PACKAGE_NAME
         run(
-            "dumpsys deviceidle whitelist -$pkg",
-            "cmd deviceidle enable"
+            "cmd deviceidle enable",
+            // Re-affirm the user-facing battery exemption in case anything else cleared it.
+            "dumpsys deviceidle whitelist +$pkg",
+            "cmd appops set $pkg RUN_IN_BACKGROUND allow",
+            "cmd appops set $pkg RUN_ANY_IN_BACKGROUND allow"
         )
     }
 
@@ -189,6 +199,11 @@ object RootManager {
 
     // ---- Quick-toggle actions (used from the focus screen when allowed) ----
 
+    /**
+     * True when the Wi‑Fi radio is on. Uses root so we see the real
+     * [Settings.Global] / dumpsys value even if app ContentResolver reads are wrong.
+     * Result is cached briefly to avoid spawning su on every UI poll tick.
+     */
     fun setWifi(enabled: Boolean) = run("svc wifi ${if (enabled) "enable" else "disable"}")
 
     fun setMobileData(enabled: Boolean) = run("svc data ${if (enabled) "enable" else "disable"}")

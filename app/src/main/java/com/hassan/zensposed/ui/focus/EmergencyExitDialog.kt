@@ -77,19 +77,25 @@ fun EmergencyExitDialog(
                 } else if (useQr) {
                     Text("Scan your ZenSposed exit QR code:")
                     Spacer(Modifier.height(8.dp))
-                    QrScanner(
-                        onQrScanned = { payload ->
-                            verifying = true
-                            scope.launch {
-                                val ok = withContext(Dispatchers.Default) {
-                                    runCatching { secure.verifyQrPayload(payload) }.getOrDefault(false)
+                    var scanSession by remember { mutableIntStateOf(0) }
+                    androidx.compose.runtime.key(scanSession) {
+                        QrScanner(
+                            onQrScanned = { payload ->
+                                verifying = true
+                                scope.launch {
+                                    val ok = withContext(Dispatchers.Default) {
+                                        runCatching { secure.verifyQrPayload(payload) }.getOrDefault(false)
+                                    }
+                                    verifying = false
+                                    if (ok) onVerified()
+                                    else {
+                                        error = "Wrong QR code. Try again."
+                                        scanSession++
+                                    }
                                 }
-                                verifying = false
-                                if (ok) onVerified()
-                                else error = "Wrong QR code. Try again."
                             }
-                        }
-                    )
+                        )
+                    }
                     error?.let {
                         Spacer(Modifier.height(8.dp))
                         Text(it, color = MaterialTheme.colorScheme.error)
