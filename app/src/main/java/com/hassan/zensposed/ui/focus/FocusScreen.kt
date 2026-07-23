@@ -132,7 +132,7 @@ fun FocusScreen(
             }
         }
         val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-        registerExportedReceiver(context, receiver, filter)
+        registerSystemReceiver(context, receiver, filter)
         onDispose {
             runCatching { context.unregisterReceiver(receiver) }
         }
@@ -493,7 +493,20 @@ private fun QuickTogglesRow(onOpenWifiPicker: () -> Unit) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
                 when (intent?.action) {
-                    WifiManager.WIFI_STATE_CHANGED_ACTION,
+                    WifiManager.WIFI_STATE_CHANGED_ACTION -> {
+                        // Prefer the intent extra — more reliable than WifiManager on Pixel.
+                        val state = intent.getIntExtra(
+                            WifiManager.EXTRA_WIFI_STATE,
+                            WifiManager.WIFI_STATE_UNKNOWN
+                        )
+                        wifi = when (state) {
+                            WifiManager.WIFI_STATE_ENABLED,
+                            WifiManager.WIFI_STATE_ENABLING -> true
+                            WifiManager.WIFI_STATE_DISABLED,
+                            WifiManager.WIFI_STATE_DISABLING -> false
+                            else -> isWifiEnabled(context)
+                        }
+                    }
                     WifiManager.NETWORK_STATE_CHANGED_ACTION,
                     ConnectivityManager.CONNECTIVITY_ACTION -> {
                         wifi = isWifiEnabled(context)
@@ -516,11 +529,28 @@ private fun QuickTogglesRow(onOpenWifiPicker: () -> Unit) {
             addAction(WIFI_AP_STATE_CHANGED_ACTION)
             addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
         }
-        registerExportedReceiver(context, receiver, filter)
+        // System radio broadcasts must be receivable from outside this app.
+        registerSystemReceiver(context, receiver, filter)
+
+        // Settings.Global.WIFI_ON updates even when WifiManager.isWifiEnabled is stale.
+        val wifiObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                wifi = isWifiEnabled(context)
+            }
+        }
+        runCatching {
+            context.contentResolver.registerContentObserver(
+                android.provider.Settings.Global.getUriFor("wifi_on"),
+                false,
+                wifiObserver
+            )
+        }
+
         refreshAll()
         onDispose {
             unregTorch()
             runCatching { context.unregisterReceiver(receiver) }
+            runCatching { context.contentResolver.unregisterContentObserver(wifiObserver) }
         }
     }
 
@@ -578,26 +608,43 @@ private fun QuickTogglesRow(onOpenWifiPicker: () -> Unit) {
 
 private const val WIFI_AP_STATE_CHANGED_ACTION = "android.net.wifi.WIFI_AP_STATE_CHANGED"
 
-/** Register a receiver with the API-33+ export flag, falling back for older runtimes. */
-private fun registerExportedReceiver(
+/** Register for system-originated broadcasts (Wi‑Fi / DND / tether). */
+private fun registerSystemReceiver(
     context: Context,
     receiver: BroadcastReceiver,
     filter: IntentFilter
 ) {
     try {
-        context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        // EXPORTED: these actions are sent by the system / other packages, not this app.
+        context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
     } catch (_: Throwable) {
-        @Suppress("UnspecifiedRegisterReceiverFlag")
-        runCatching { context.registerReceiver(receiver, filter) }
+        try {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } catch (_: Throwable) {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            runCatching { context.registerReceiver(receiver, filter) }
+        }
     }
 }
 
-@Suppress("DEPRECATION")
-private fun isWifiEnabled(context: Context): Boolean = try {
-    val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-    wm.isWifiEnabled
-} catch (_: Throwable) {
-    false
+/**
+ * Wi‑Fi radio on/off. Prefer Settings.Global.WIFI_ON — on recent Pixel builds
+ * [WifiManager.isWifiEnabled] can lag or fail while the global setting stays accurate.
+ */
+private fun isWifiEnabled(context: Context): Boolean {
+    try {
+        // 0 = off, 1 = on, 2 = on (airplane override still stores enabled desire on some builds)
+        val v = android.provider.Settings.Global.getInt(context.contentResolver, "wifi_on", -1)
+        if (v >= 0) return v != 0
+    } catch (_: Throwable) {
+    }
+    return try {
+        val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        @Suppress("DEPRECATION")
+        wm.isWifiEnabled
+    } catch (_: Throwable) {
+        false
+    }
 }
 
 private fun isMobileDataEnabled(context: Context): Boolean = try {
@@ -609,7 +656,7 @@ private fun isMobileDataEnabled(context: Context): Boolean = try {
     false
 }
 
-/** Soft-AP / hotspot on — reflection for the hidden WifiManager API, then broadcast extras. */
+/** Soft-AP / hotspot on — reflection for the hidden WifiManager API, then settings fallback. */
 @Suppress("DEPRECATION")
 private fun isHotspotEnabled(context: Context): Boolean {
     try {
