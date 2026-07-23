@@ -3,7 +3,9 @@ package com.hassan.zensposed.core
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import android.provider.Telephony
+import android.view.inputmethod.InputMethodManager
 
 /**
  * Resolves Dialer / Messaging / Contacts / Calculator for the focus UI, plus the
@@ -13,6 +15,7 @@ object AppResolver {
 
     private var uiCache: Set<String>? = null
     private var enforceCache: Set<String>? = null
+    private var imeCache: Set<String>? = null
 
     /**
      * The four default apps shown on the focus screen and greyed in the whitelist
@@ -82,12 +85,38 @@ object AppResolver {
         result.addAll(defaultUiPackages(context))
         result.addAll(Constants.ALWAYS_ALLOWED)
         result.addAll(Constants.SESSION_SYSTEM_UI)
+        result.addAll(inputMethodPackages(context))
         // Include any installed package that looks like the system share/docs UI.
         val pm = context.packageManager
         for (pkg in Constants.SESSION_SYSTEM_UI) {
             runCatching { pm.getApplicationInfo(pkg, 0); result.add(pkg) }
         }
         enforceCache = result
+        return result
+    }
+
+    /**
+     * Soft-keyboard packages that must not trigger the focus bounce when typing
+     * inside a whitelisted app (Gboard, OEM IMEs, etc.).
+     */
+    fun inputMethodPackages(context: Context): Set<String> {
+        imeCache?.let { return it }
+        val result = LinkedHashSet<String>()
+        result.addAll(Constants.SESSION_IME)
+        runCatching {
+            val imm = context.getSystemService(InputMethodManager::class.java)
+            imm?.enabledInputMethodList?.forEach { info ->
+                result.add(info.packageName)
+            }
+        }
+        runCatching {
+            val defaultId = Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.DEFAULT_INPUT_METHOD
+            )
+            defaultId?.substringBefore('/')?.takeIf { it.isNotBlank() }?.let { result.add(it) }
+        }
+        imeCache = result
         return result
     }
 
@@ -101,12 +130,26 @@ object AppResolver {
             lower.endsWith(".packageinstaller")
     }
 
+    /** True when [pkg] is an input method (soft keyboard). */
+    fun isInputMethod(pkg: String, context: Context? = null): Boolean {
+        if (pkg in Constants.SESSION_IME) return true
+        val lower = pkg.lowercase()
+        if (lower.contains("inputmethod") || lower.contains("keyboard") ||
+            lower.contains("honeyboard") || lower.contains("swiftkey")
+        ) {
+            return true
+        }
+        if (context != null && pkg in inputMethodPackages(context)) return true
+        return false
+    }
+
     fun alwaysAllowedLaunchable(context: Context): List<String> =
         defaultUiPackages(context).toList()
 
     fun invalidate() {
         uiCache = null
         enforceCache = null
+        imeCache = null
     }
 
     private val CALCULATOR_FALLBACKS = listOf(

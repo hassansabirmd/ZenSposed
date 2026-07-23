@@ -1,5 +1,9 @@
 package com.hassan.zensposed.ui.settings
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,9 +45,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hassan.zensposed.core.Constants
 import com.hassan.zensposed.data.settings.FocusSettings
@@ -54,9 +60,22 @@ import com.hassan.zensposed.ui.MainViewModel
 fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val apps by viewModel.installedApps.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showWhitelistDialog by remember { mutableStateOf(false) }
     var showQrDialog by remember { mutableStateOf(false) }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* grant result handled when scanner opens; requesting early avoids focus-exit lockout */ }
+
+    fun ensureCameraPermission() {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
 
     LaunchedEffect(Unit) { viewModel.loadInstalledApps() }
 
@@ -91,7 +110,11 @@ fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     method = settings.exitMethod,
                     hasPassword = settings.hasPassword,
                     onSelectPassword = { viewModel.setExitMethod(FocusSettings.EXIT_PASSWORD) },
-                    onSelectQr = { viewModel.setExitMethod(FocusSettings.EXIT_QR) }
+                    onSelectQr = {
+                        // Request camera now so emergency exit scan works later in a session.
+                        ensureCameraPermission()
+                        viewModel.setExitMethod(FocusSettings.EXIT_QR)
+                    }
                 )
                 Spacer(Modifier.height(10.dp))
                 if (settings.exitMethod == FocusSettings.EXIT_PASSWORD) {
@@ -108,7 +131,10 @@ fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                             "Set up exit QR code"
                         },
                         subtitle = "Scan your own QR with the camera, or generate one to save/print.",
-                        onClick = { showQrDialog = true }
+                        onClick = {
+                            ensureCameraPermission()
+                            showQrDialog = true
+                        }
                     )
                 }
                 Spacer(Modifier.height(20.dp))
@@ -167,7 +193,7 @@ fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 Spacer(Modifier.height(20.dp))
                 SectionTitle("Whitelisted apps")
                 Text(
-                    "Calls, SMS, share sheets, and file pickers are always allowed. Whitelisted apps appear on the focus screen. Use “Show system apps” in the picker for other system panels.",
+                    "Calls, SMS, keyboards (Gboard), share sheets, and file pickers are always allowed. Whitelisted apps appear on the focus screen. Use “Show system apps” in the picker for other system panels.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp)
@@ -208,8 +234,12 @@ fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
         ExitQrDialog(
             initialPayload = viewModel.qrPayloadOrNull(),
             initiallyCustom = viewModel.isCustomQr(),
-            onRegenerate = { viewModel.regenerateQr() },
+            onRegenerate = {
+                ensureCameraPermission()
+                viewModel.regenerateQr()
+            },
             onScanCustom = { viewModel.setCustomQr(it) },
+            onRequestCamera = { ensureCameraPermission() },
             onDismiss = { showQrDialog = false }
         )
     }
@@ -324,6 +354,7 @@ private fun ExitQrDialog(
     initiallyCustom: Boolean,
     onRegenerate: () -> String,
     onScanCustom: (String) -> Boolean,
+    onRequestCamera: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var currentPayload by remember { mutableStateOf(initialPayload) }
@@ -331,6 +362,9 @@ private fun ExitQrDialog(
     var scanning by remember { mutableStateOf(false) }
     var scanSession by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf<String?>(null) }
+
+    // Ask for camera as soon as the manage/generate dialog opens so exit scan works later.
+    LaunchedEffect(Unit) { onRequestCamera() }
 
     val bitmap = remember(currentPayload, isCustom) {
         if (isCustom || currentPayload.isNullOrBlank()) null
@@ -378,7 +412,8 @@ private fun ExitQrDialog(
                 } else {
                     Text(
                         "Screenshot or print this code and keep it somewhere you can reach in an emergency. " +
-                            "Or tap “Scan my QR” to use a code you already have.",
+                            "Or tap “Scan my QR” to use a code you already have. " +
+                            "Camera permission is requested here so you can scan to exit during a session.",
                         fontSize = 13.sp
                     )
                     Spacer(Modifier.height(16.dp))
@@ -408,6 +443,7 @@ private fun ExitQrDialog(
             } else {
                 TextButton(onClick = {
                     status = null
+                    onRequestCamera()
                     scanning = true
                 }) { Text("Scan my QR") }
             }
@@ -416,9 +452,10 @@ private fun ExitQrDialog(
             if (!scanning) {
                 Row {
                     TextButton(onClick = {
+                        onRequestCamera()
                         currentPayload = onRegenerate()
                         isCustom = false
-                        status = "Generated a new ZenSposed QR code."
+                        status = "Generated a new ZenSposed QR code. Camera permission was requested for exit scanning."
                     }) { Text("Generate") }
                     TextButton(onClick = onDismiss) { Text("Done") }
                 }

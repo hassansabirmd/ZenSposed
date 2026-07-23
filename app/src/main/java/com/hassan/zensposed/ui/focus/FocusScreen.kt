@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.drawable.Drawable
+import android.app.NotificationManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
@@ -81,6 +82,7 @@ import com.hassan.zensposed.focus.FocusController
 import com.hassan.zensposed.focus.TorchController
 import com.hassan.zensposed.root.RootManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -130,7 +132,7 @@ fun FocusScreen(
             }
         }
         val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-        context.registerReceiver(receiver, filter)
+        registerExportedReceiver(context, receiver, filter)
         onDispose {
             runCatching { context.unregisterReceiver(receiver) }
         }
@@ -468,24 +470,41 @@ private fun QuickTogglesRow(onOpenWifiPicker: () -> Unit) {
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var wifi by remember { mutableStateOf(isWifiEnabled(context)) }
     var data by remember { mutableStateOf(isMobileDataEnabled(context)) }
-    var hotspot by remember { mutableStateOf(false) }
-    var torch by remember { mutableStateOf(TorchController.isOn()) }
+    var hotspot by remember { mutableStateOf(isHotspotEnabled(context)) }
+    var torch by remember {
+        TorchController.ensureObserving(context)
+        mutableStateOf(TorchController.isOn())
+    }
     var dnd by remember { mutableStateOf(DndController.isOn(context)) }
 
-    fun refreshConnectivity() {
+    fun refreshAll() {
         wifi = isWifiEnabled(context)
         data = isMobileDataEnabled(context)
+        hotspot = isHotspotEnabled(context)
+        torch = TorchController.isOn()
         dnd = DndController.isOn(context)
     }
 
-    // Keep icon in sync when the system Wi‑Fi panel (or anything else) flips radio state.
+    // Keep icons in sync when QS / status bar / other apps flip radio or torch state.
     DisposableEffect(Unit) {
+        TorchController.ensureObserving(context)
+        val unregTorch = TorchController.addListener { on -> torch = on }
+
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
                 when (intent?.action) {
                     WifiManager.WIFI_STATE_CHANGED_ACTION,
                     WifiManager.NETWORK_STATE_CHANGED_ACTION,
-                    ConnectivityManager.CONNECTIVITY_ACTION -> refreshConnectivity()
+                    ConnectivityManager.CONNECTIVITY_ACTION -> {
+                        wifi = isWifiEnabled(context)
+                        data = isMobileDataEnabled(context)
+                    }
+                    WIFI_AP_STATE_CHANGED_ACTION -> {
+                        hotspot = isHotspotEnabled(context)
+                    }
+                    NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED -> {
+                        dnd = DndController.isOn(context)
+                    }
                 }
             }
         }
@@ -494,9 +513,13 @@ private fun QuickTogglesRow(onOpenWifiPicker: () -> Unit) {
             addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
             @Suppress("DEPRECATION")
             addAction(ConnectivityManager.CONNECTIVITY_ACTION)
+            addAction(WIFI_AP_STATE_CHANGED_ACTION)
+            addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
         }
-        context.registerReceiver(receiver, filter)
+        registerExportedReceiver(context, receiver, filter)
+        refreshAll()
         onDispose {
+            unregTorch()
             runCatching { context.unregisterReceiver(receiver) }
         }
     }
@@ -504,11 +527,19 @@ private fun QuickTogglesRow(onOpenWifiPicker: () -> Unit) {
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                refreshConnectivity()
+                refreshAll()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Shade toggles often leave Focus resumed; poll so icons catch up quickly.
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_200L)
+            refreshAll()
+        }
     }
 
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -545,6 +576,22 @@ private fun QuickTogglesRow(onOpenWifiPicker: () -> Unit) {
     }
 }
 
+private const val WIFI_AP_STATE_CHANGED_ACTION = "android.net.wifi.WIFI_AP_STATE_CHANGED"
+
+/** Register a receiver with the API-33+ export flag, falling back for older runtimes. */
+private fun registerExportedReceiver(
+    context: Context,
+    receiver: BroadcastReceiver,
+    filter: IntentFilter
+) {
+    try {
+        context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+    } catch (_: Throwable) {
+        @Suppress("UnspecifiedRegisterReceiverFlag")
+        runCatching { context.registerReceiver(receiver, filter) }
+    }
+}
+
 @Suppress("DEPRECATION")
 private fun isWifiEnabled(context: Context): Boolean = try {
     val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -560,6 +607,23 @@ private fun isMobileDataEnabled(context: Context): Boolean = try {
     caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
 } catch (_: Throwable) {
     false
+}
+
+/** Soft-AP / hotspot on — reflection for the hidden WifiManager API, then broadcast extras. */
+@Suppress("DEPRECATION")
+private fun isHotspotEnabled(context: Context): Boolean {
+    try {
+        val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val method = wm.javaClass.getMethod("isWifiApEnabled")
+        return method.invoke(wm) as? Boolean == true
+    } catch (_: Throwable) {
+    }
+    return try {
+        // wifi_ap_state: 13 = WIFI_AP_STATE_ENABLED
+        android.provider.Settings.Global.getInt(context.contentResolver, "wifi_ap_state", 11) == 13
+    } catch (_: Throwable) {
+        false
+    }
 }
 
 private fun readBatteryPercent(context: Context): Int {

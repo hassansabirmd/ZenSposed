@@ -73,4 +73,24 @@ object Constants {
         "com.android.vpndialogs",
         "com.android.captiveportallogin"
     )
+
+    /**
+     * Common IME packages. Soft keyboards surface as window-state owners when typing
+     * in a whitelisted app; without this the accessibility watchdog pulls Focus forward.
+     * [com.hassan.zensposed.core.AppResolver] also adds every enabled IME dynamically.
+     */
+    val SESSION_IME = setOf(
+        "com.google.android.inputmethod.latin", // Gboard
+        "com.android.inputmethod.latin", // AOSP LatinIME
+        "com.google.android.apps.inputmethod.hindi",
+        "com.google.android.apps.inputmethod.zhuyin",
+        "com.google.android.apps.inputmethod.japanese",
+        "com.google.android.apps.inputmethod.korean",
+        "com.google.android.inputmethod.pinyin",
+        "com.android.inputmethod.pinyin",
+        "com.samsung.android.honeyboard",
+        "com.sec.android.inputmethod",
+        "com.touchtype.swiftkey",
+        "com.sonyericsson.textinput.chinese"
+    )
 }
