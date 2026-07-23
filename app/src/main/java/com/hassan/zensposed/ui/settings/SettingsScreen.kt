@@ -123,10 +123,10 @@ fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 Spacer(Modifier.height(20.dp))
                 SectionTitle("Focus behavior")
                 ToggleRow(
-                    title = "Swipe from above to open notification / quick settings panel",
-                    subtitle = "When on, you can pull the panel down during a session.",
-                    checked = settings.allowNotificationPanel,
-                    onChange = viewModel::setAllowNotificationPanel
+                    title = "Block swipe down from status bar",
+                    subtitle = "When on, notification shade and quick settings stay locked during a session.",
+                    checked = !settings.allowNotificationPanel,
+                    onChange = { block -> viewModel.setAllowNotificationPanel(!block) }
                 )
                 ToggleRow(
                     title = "Block Home button / gesture during session",
