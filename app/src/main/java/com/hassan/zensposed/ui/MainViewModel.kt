@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -49,6 +50,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch {
+            // One-time heal: if settings say "no password" but a hash exists, it is an
+            // orphan from a failed/partial write — clear it so first-time set works.
+            val snap = settingsRepo.settings.first()
+            if (!snap.hasPassword && securePrefs.hasPassword()) {
+                securePrefs.clearPassword()
+            } else if (snap.hasPassword != securePrefs.hasPassword()) {
+                settingsRepo.setHasPassword(securePrefs.hasPassword())
+            }
             settingsRepo.settings.collect { s ->
                 if (s.onboardingDone) {
                     SettingsRepository.writeOnboardingSync(application, true)
@@ -231,10 +240,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun verifyPassword(pw: String): Boolean = securePrefs.verify(pw)
 
-    /** Change/set password. Requires current password if one already exists. */
+    /** Change/set password. Requires current password only when one already exists in SecurePrefs. */
     suspend fun setPassword(newPassword: String, currentPassword: String?): Result<Unit> {
-        if (securePrefs.hasPassword()) {
-            if (currentPassword == null || !securePrefs.verify(currentPassword)) {
+        val alreadySet = securePrefs.hasPassword()
+        if (alreadySet) {
+            if (currentPassword.isNullOrEmpty() || !securePrefs.verify(currentPassword)) {
                 return Result.failure(IllegalArgumentException("Current password is incorrect"))
             }
         }

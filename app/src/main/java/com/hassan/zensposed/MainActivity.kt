@@ -23,6 +23,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.hassan.zensposed.core.Constants
+import com.hassan.zensposed.core.PermissionUtils
 import com.hassan.zensposed.core.PrivilegeRequirements
 import com.hassan.zensposed.data.settings.FocusSettings
 import com.hassan.zensposed.data.settings.SettingsRepository
@@ -37,6 +38,7 @@ import com.hassan.zensposed.ui.settings.SettingsScreen
 import com.hassan.zensposed.ui.stats.StatsScreen
 import com.hassan.zensposed.ui.stats.StatsViewModel
 import com.hassan.zensposed.ui.theme.ZenSposedTheme
+import androidx.compose.runtime.LaunchedEffect
 
 class MainActivity : ComponentActivity() {
 
@@ -67,11 +69,13 @@ class MainActivity : ComponentActivity() {
                             .background(MaterialTheme.colorScheme.background)
                     )
                 } else {
-                    // No limited/normal mode — root + LSPosed hooks are mandatory.
-                    val privilegesReady = PrivilegeRequirements.check().ready
+                    // Require full onboarding checklist (root/LSPosed + runtime permissions).
+                    // Do not jump to home just because an older install marked onboarding done
+                    // once privileges become ready.
+                    val setupComplete = PermissionUtils.isSetupComplete(this@MainActivity)
                     val onboarded = settings.onboardingDone ||
                         SettingsRepository.isOnboardingDoneSync(this@MainActivity)
-                    val start = if (onboarded && privilegesReady) "home" else "onboarding"
+                    val start = if (onboarded && setupComplete) "home" else "onboarding"
 
                     NavHost(navController = navController, startDestination = start) {
                         composable("onboarding") {
@@ -83,6 +87,14 @@ class MainActivity : ComponentActivity() {
                             })
                         }
                         composable("home") {
+                            // If setup became incomplete (e.g. accessibility revoked), send back.
+                            LaunchedEffect(Unit) {
+                                if (!PermissionUtils.isSetupComplete(this@MainActivity)) {
+                                    navController.navigate("onboarding") {
+                                        popUpTo("home") { inclusive = true }
+                                    }
+                                }
+                            }
                             HomeScreen(
                                 profiles = profiles,
                                 deepZenWhitelist = settings.whitelist,

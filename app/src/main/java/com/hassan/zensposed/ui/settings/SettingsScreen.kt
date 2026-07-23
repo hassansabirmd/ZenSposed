@@ -96,7 +96,7 @@ fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 Spacer(Modifier.height(10.dp))
                 if (settings.exitMethod == FocusSettings.EXIT_PASSWORD) {
                     SettingRow(
-                        title = if (settings.hasPassword) "Change emergency password" else "Set emergency password",
+                        title = if (viewModel.hasPassword()) "Change emergency password" else "Set emergency password",
                         subtitle = "Minimum ${Constants.MIN_PASSWORD_LENGTH} characters. Required to exit early.",
                         onClick = { showPasswordDialog = true }
                     )
@@ -188,7 +188,7 @@ fun SettingsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
     if (showPasswordDialog) {
         PasswordDialog(
-            hasExisting = settings.hasPassword,
+            hasExisting = viewModel.hasPassword(),
             viewModel = viewModel,
             onDismiss = { showPasswordDialog = false }
         )
