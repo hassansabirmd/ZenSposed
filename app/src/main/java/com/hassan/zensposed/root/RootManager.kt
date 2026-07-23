@@ -204,65 +204,7 @@ object RootManager {
      * [Settings.Global] / dumpsys value even if app ContentResolver reads are wrong.
      * Result is cached briefly to avoid spawning su on every UI poll tick.
      */
-    @Volatile
-    private var wifiCache: Boolean? = null
-    @Volatile
-    private var wifiCacheAtMs: Long = 0L
-
-    /** Update / clear the short-lived Wi‑Fi cache (broadcasts must not be overwritten by stale su). */
-    fun noteWifiEnabled(enabled: Boolean) {
-        wifiCache = enabled
-        wifiCacheAtMs = System.currentTimeMillis()
-    }
-
-    fun clearWifiCache() {
-        wifiCache = null
-        wifiCacheAtMs = 0L
-    }
-
-    fun readWifiEnabled(): Boolean? {
-        val now = System.currentTimeMillis()
-        val cached = wifiCache
-        if (cached != null && now - wifiCacheAtMs < 800L) return cached
-        return try {
-            val settings = Shell.cmd("settings get global wifi_on 2>/dev/null").exec()
-                .out.firstOrNull()?.trim()
-            val asInt = settings?.toIntOrNull()
-            if (asInt != null) {
-                val on = asInt != 0
-                noteWifiEnabled(on)
-                return on
-            }
-
-            val dump = Shell.cmd(
-                "dumpsys wifi 2>/dev/null | grep -m1 -iE " +
-                    "'Wi-Fi is (enabled|disabled)|mWifiEnabled|WifiEnabledState'"
-            ).exec().out.joinToString(" ").lowercase()
-            val on = when {
-                dump.contains("wi-fi is enabled") ||
-                    dump.contains("mwifienabled true") ||
-                    dump.contains("mwifienabled=true") ||
-                    dump.contains("wifienabledstate=enabled") ||
-                    dump.contains("wifienabledstate enabled") -> true
-                dump.contains("wi-fi is disabled") ||
-                    dump.contains("mwifienabled false") ||
-                    dump.contains("mwifienabled=false") ||
-                    dump.contains("wifienabledstate=disabled") ||
-                    dump.contains("wifienabledstate disabled") -> false
-                else -> null
-            }
-            if (on != null) noteWifiEnabled(on)
-            on
-        } catch (t: Throwable) {
-            Log.w(TAG, "readWifiEnabled failed", t)
-            null
-        }
-    }
-
-    fun setWifi(enabled: Boolean) {
-        noteWifiEnabled(enabled)
-        run("svc wifi ${if (enabled) "enable" else "disable"}")
-    }
+    fun setWifi(enabled: Boolean) = run("svc wifi ${if (enabled) "enable" else "disable"}")
 
     fun setMobileData(enabled: Boolean) = run("svc data ${if (enabled) "enable" else "disable"}")
 
