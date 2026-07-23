@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">ZenSposed</string>
+    <string name="xposed_description">Requires Magisk/KernelSU (Zygisk) + LSPosed. Scope must include System Framework (android). Enforces status-bar lock, uninstall block, and non-whitelisted app veto during focus sessions.</string>
+    <string name="device_admin_description">ZenSposed uses device administration to keep focus sessions tamper-proof (prevents uninstall and force-stop during an active session).</string>
+    <string name="accessibility_description">Secondary watchdog: re-asserts the focus screen if a non-whitelisted app opens. Root + LSPosed remain required for full enforcement.</string>
+</resources>
